@@ -1,33 +1,60 @@
-import { Tabs } from 'expo-router';
+import {
+  createNativeBottomTabNavigator,
+  type NativeBottomTabNavigationEventMap,
+  type NativeBottomTabNavigationOptions,
+} from '@bottom-tabs/react-navigation';
+import type { ParamListBase, TabNavigationState } from '@react-navigation/native';
+import { withLayoutContext } from 'expo-router';
 import React from 'react';
 
-import { HapticTab } from '@/components/haptic-tab';
-import { IconSymbol } from '@/components/ui/icon-symbol';
-import { Colors } from '@/constants/theme';
-import { useColorScheme } from '@/hooks/use-color-scheme';
+import { darkThemeTokens } from '@/src/shared/theme/tokens';
+
+const BottomTabs = createNativeBottomTabNavigator();
+
+const Tabs = withLayoutContext<
+  NativeBottomTabNavigationOptions,
+  typeof BottomTabs.Navigator,
+  TabNavigationState<ParamListBase>,
+  NativeBottomTabNavigationEventMap
+>(BottomTabs.Navigator);
 
 export default function TabLayout() {
-  const colorScheme = useColorScheme();
-
   return (
     <Tabs
-      screenOptions={{
-        tabBarActiveTintColor: Colors[colorScheme ?? 'light'].tint,
-        headerShown: false,
-        tabBarButton: HapticTab,
-      }}>
+      hapticFeedbackEnabled
+      tabBarStyle={{
+        backgroundColor: darkThemeTokens.surface,
+      }}
+      tabBarActiveTintColor={darkThemeTokens.accent}
+      tabBarInactiveTintColor={darkThemeTokens.textSecondary}>
       <Tabs.Screen
         name="index"
         options={{
           title: 'Home',
-          tabBarIcon: ({ color }) => <IconSymbol size={28} name="house.fill" color={color} />,
+          tabBarIcon: ({ focused }) => ({ sfSymbol: focused ? 'house.fill' : 'house' }),
         }}
       />
       <Tabs.Screen
-        name="explore"
+        name="transactions"
         options={{
-          title: 'Explore',
-          tabBarIcon: ({ color }) => <IconSymbol size={28} name="paperplane.fill" color={color} />,
+          title: 'Transactions',
+          tabBarIcon: ({ focused }) => ({
+            sfSymbol: focused ? 'list.bullet.rectangle.portrait.fill' : 'list.bullet.rectangle.portrait',
+          }),
+        }}
+      />
+      <Tabs.Screen
+        name="budgets"
+        options={{
+          title: 'Budgets',
+          tabBarIcon: ({ focused }) => ({ sfSymbol: focused ? 'chart.bar.fill' : 'chart.bar' }),
+        }}
+      />
+      <Tabs.Screen
+        name="settings"
+        options={{
+          title: 'Settings',
+          tabBarIcon: ({ focused }) => ({ sfSymbol: focused ? 'gearshape.fill' : 'gearshape' }),
         }}
       />
     </Tabs>

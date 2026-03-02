@@ -9,7 +9,8 @@
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.anonymous.quick-track"
     },
     "android": {
       "adaptiveIcon": {
@@ -38,6 +39,9 @@
             "backgroundColor": "#000000"
           }
         }
+      ],
+      [
+        "react-native-bottom-tabs"
       ]
     ],
     "experiments": {

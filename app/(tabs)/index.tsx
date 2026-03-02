@@ -182,8 +182,8 @@ export default function HomeScreen() {
                 <PieChart
                   data={pieData}
                   donut
-                  radius={82}
-                  innerRadius={56}
+                  radius={100}
+                  innerRadius={66}
                   innerCircleColor={darkThemeTokens.surface}
                   textColor={darkThemeTokens.textPrimary}
                   textSize={11}

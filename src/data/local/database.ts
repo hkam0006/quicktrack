@@ -1,13 +1,15 @@
 import { openDatabaseAsync, type SQLiteDatabase } from 'expo-sqlite';
 
+import { supabase } from '@/src/data/remote/supabase.client';
 import { defaultCategoryDrafts } from '@/src/shared/lib/default-categories';
 import type { BudgetProgress, CategorySpendSlice, DailyTrendPoint, MonthSummary } from '@/src/shared/types';
 import { toCents } from '@/src/shared/types';
 
 const DB_NAME = 'quick-track.db';
-const LOCAL_USER_ID = 'local-user';
+const FALLBACK_LOCAL_USER_ID = 'local-user';
 
 let dbPromise: Promise<SQLiteDatabase> | null = null;
+const initByUserId = new Map<string, Promise<void>>();
 
 export interface TransactionInput {
   type: 'expense' | 'income';
@@ -130,164 +132,107 @@ function getMonthBounds(date = new Date()): { startIso: string; endIso: string }
   return { startIso: start.toISOString(), endIso: end.toISOString() };
 }
 
-function getYearBounds(date = new Date()): { startIso: string; endIso: string } {
-  const start = new Date(Date.UTC(date.getUTCFullYear(), 0, 1, 0, 0, 0, 0));
-  const end = new Date(Date.UTC(date.getUTCFullYear(), 11, 31, 23, 59, 59, 999));
-  return { startIso: start.toISOString(), endIso: end.toISOString() };
+async function resolveUserId(): Promise<string> {
+  const { data, error } = await supabase.auth.getSession();
+  if (error) {
+    return FALLBACK_LOCAL_USER_ID;
+  }
+
+  return data.session?.user?.id ?? FALLBACK_LOCAL_USER_ID;
 }
 
-async function seedIfNeeded(db: SQLiteDatabase): Promise<void> {
+async function dedupeCategories(db: SQLiteDatabase, userId: string): Promise<void> {
+  const duplicateNames = await db.getAllAsync<{ name: string }>(
+    `SELECT name
+     FROM categories
+     WHERE user_id = ?
+       AND deleted_at IS NULL
+     GROUP BY name
+     HAVING COUNT(*) > 1`,
+    userId
+  );
+
+  if (duplicateNames.length === 0) {
+    return;
+  }
+
+  const now = new Date().toISOString();
+
+  for (const duplicateName of duplicateNames) {
+    const rows = await db.getAllAsync<{ id: string }>(
+      `SELECT id
+       FROM categories
+       WHERE user_id = ?
+         AND name = ?
+         AND deleted_at IS NULL
+       ORDER BY created_at ASC, id ASC`,
+      userId,
+      duplicateName.name
+    );
+
+    const [canonical, ...duplicates] = rows;
+    if (!canonical || duplicates.length === 0) {
+      continue;
+    }
+
+    for (const duplicate of duplicates) {
+      await db.runAsync(
+        'UPDATE transactions SET category_id = ? WHERE user_id = ? AND category_id = ?',
+        canonical.id,
+        userId,
+        duplicate.id
+      );
+      await db.runAsync(
+        'UPDATE budgets SET category_id = ? WHERE user_id = ? AND category_id = ?',
+        canonical.id,
+        userId,
+        duplicate.id
+      );
+      await db.runAsync(
+        'UPDATE categories SET deleted_at = ?, updated_at = ? WHERE id = ?',
+        now,
+        now,
+        duplicate.id
+      );
+    }
+  }
+}
+
+async function seedIfNeeded(db: SQLiteDatabase, userId: string): Promise<void> {
+  await dedupeCategories(db, userId);
+
   const categoryCount = await db.getFirstAsync<{ count: number }>(
     'SELECT COUNT(*) as count FROM categories WHERE user_id = ? AND deleted_at IS NULL',
-    LOCAL_USER_ID
+    userId
   );
 
   if ((categoryCount?.count ?? 0) === 0) {
     const now = new Date().toISOString();
 
     for (const category of defaultCategoryDrafts) {
-      await db.runAsync(
-        `INSERT INTO categories (id, user_id, name, color, icon, is_default, is_archived, created_at, updated_at, deleted_at)
-         VALUES (?, ?, ?, ?, ?, 1, 0, ?, ?, NULL)`,
-        makeId('cat'),
-        LOCAL_USER_ID,
-        category.name,
-        category.color,
-        category.icon,
-        now,
-        now
+      const existingCategory = await db.getFirstAsync<{ id: string }>(
+        `SELECT id
+         FROM categories
+         WHERE user_id = ?
+           AND name = ?
+           AND deleted_at IS NULL
+         LIMIT 1`,
+        userId,
+        category.name
       );
-    }
 
-    const categories = await db.getAllAsync<CategoryOptionRow>(
-      'SELECT id, name FROM categories WHERE user_id = ? AND deleted_at IS NULL',
-      LOCAL_USER_ID
-    );
-
-    const categoryByName = new Map(categories.map((item) => [item.name, item.id]));
-
-    const nowDate = new Date();
-    const monthBounds = getMonthBounds(nowDate);
-    const yearBounds = getYearBounds(nowDate);
-
-    await db.runAsync(
-      `INSERT INTO budgets (id, user_id, period, amount_cents, category_id, start_date, end_date, alert_at_80_percent, alert_at_100_percent, created_at, updated_at, deleted_at)
-       VALUES (?, ?, 'monthly', ?, NULL, ?, ?, 1, 1, ?, ?, NULL)`,
-      makeId('budget'),
-      LOCAL_USER_ID,
-      320000,
-      monthBounds.startIso,
-      monthBounds.endIso,
-      now,
-      now
-    );
-
-    for (const [name, cents] of [
-      ['Food', 120000],
-      ['Transport', 45000],
-      ['Bills', 80000],
-      ['Fun', 50000],
-    ] as const) {
-      const categoryId = categoryByName.get(name);
-      if (!categoryId) {
+      if (existingCategory) {
         continue;
       }
 
       await db.runAsync(
-        `INSERT INTO budgets (id, user_id, period, amount_cents, category_id, start_date, end_date, alert_at_80_percent, alert_at_100_percent, created_at, updated_at, deleted_at)
-         VALUES (?, ?, 'monthly', ?, ?, ?, ?, 1, 1, ?, ?, NULL)`,
-        makeId('budget'),
-        LOCAL_USER_ID,
-        cents,
-        categoryId,
-        monthBounds.startIso,
-        monthBounds.endIso,
-        now,
-        now
-      );
-    }
-
-    await db.runAsync(
-      `INSERT INTO budgets (id, user_id, period, amount_cents, category_id, start_date, end_date, alert_at_80_percent, alert_at_100_percent, created_at, updated_at, deleted_at)
-       VALUES (?, ?, 'yearly', ?, NULL, ?, ?, 1, 1, ?, ?, NULL)`,
-      makeId('budget'),
-      LOCAL_USER_ID,
-      4800000,
-      yearBounds.startIso,
-      yearBounds.endIso,
-      now,
-      now
-    );
-
-    const sampleTransactions = [
-      {
-        type: 'income' as const,
-        amount_cents: 420000,
-        dayOffset: 0,
-        categoryName: null,
-        payment_method: 'bank' as const,
-        note: 'Salary',
-      },
-      {
-        type: 'expense' as const,
-        amount_cents: 2300,
-        dayOffset: 1,
-        categoryName: 'Food',
-        payment_method: 'card' as const,
-        note: 'Coffee',
-      },
-      {
-        type: 'expense' as const,
-        amount_cents: 12800,
-        dayOffset: 2,
-        categoryName: 'Food',
-        payment_method: 'card' as const,
-        note: 'Groceries',
-      },
-      {
-        type: 'expense' as const,
-        amount_cents: 7500,
-        dayOffset: 4,
-        categoryName: 'Transport',
-        payment_method: 'card' as const,
-        note: 'Ride share',
-      },
-      {
-        type: 'expense' as const,
-        amount_cents: 41000,
-        dayOffset: 7,
-        categoryName: 'Bills',
-        payment_method: 'bank' as const,
-        note: 'Electricity bill',
-      },
-      {
-        type: 'expense' as const,
-        amount_cents: 18500,
-        dayOffset: 10,
-        categoryName: 'Fun',
-        payment_method: 'card' as const,
-        note: 'Concert ticket',
-      },
-    ];
-
-    for (const tx of sampleTransactions) {
-      const occurredAtDate = new Date();
-      occurredAtDate.setUTCDate(occurredAtDate.getUTCDate() - tx.dayOffset);
-      occurredAtDate.setUTCHours(8, 30, 0, 0);
-
-      const categoryId = tx.categoryName ? categoryByName.get(tx.categoryName) ?? null : null;
-
-      await db.runAsync(
-        `INSERT INTO transactions (id, user_id, type, amount_cents, occurred_at, category_id, payment_method, note, recurrence_rule_id, created_at, updated_at, deleted_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, NULL)`,
-        makeId('txn'),
-        LOCAL_USER_ID,
-        tx.type,
-        tx.amount_cents,
-        occurredAtDate.toISOString(),
-        categoryId,
-        tx.payment_method,
-        tx.note,
+        `INSERT INTO categories (id, user_id, name, color, icon, is_default, is_archived, created_at, updated_at, deleted_at)
+         VALUES (?, ?, ?, ?, ?, 1, 0, ?, ?, NULL)`,
+        makeId('cat'),
+        userId,
+        category.name,
+        category.color,
+        category.icon,
         now,
         now
       );
@@ -296,12 +241,30 @@ async function seedIfNeeded(db: SQLiteDatabase): Promise<void> {
 }
 
 export async function initLocalDatabase(): Promise<void> {
-  const db = await getDbAsync();
-  await db.execAsync(createSchemaSql);
-  await seedIfNeeded(db);
+  const userId = await resolveUserId();
+  const existingInit = initByUserId.get(userId);
+  if (existingInit) {
+    await existingInit;
+    return;
+  }
+
+  const initialize = (async () => {
+    const db = await getDbAsync();
+    await db.execAsync(createSchemaSql);
+    await seedIfNeeded(db, userId);
+  })();
+
+  initByUserId.set(userId, initialize);
+
+  try {
+    await initialize;
+  } finally {
+    initByUserId.delete(userId);
+  }
 }
 
 export async function getHomeSummary(): Promise<MonthSummary> {
+  const userId = await resolveUserId();
   const db = await getDbAsync();
   const { startIso, endIso } = getMonthBounds();
 
@@ -313,7 +276,7 @@ export async function getHomeSummary(): Promise<MonthSummary> {
      WHERE user_id = ?
        AND deleted_at IS NULL
        AND occurred_at BETWEEN ? AND ?`,
-    LOCAL_USER_ID,
+    userId,
     startIso,
     endIso
   );
@@ -331,6 +294,7 @@ export async function getHomeSummary(): Promise<MonthSummary> {
 }
 
 export async function getTopCategorySpending(limit = 5): Promise<CategorySpendSlice[]> {
+  const userId = await resolveUserId();
   const db = await getDbAsync();
   const { startIso, endIso } = getMonthBounds();
 
@@ -349,7 +313,7 @@ export async function getTopCategorySpending(limit = 5): Promise<CategorySpendSl
      GROUP BY t.category_id, c.name, c.color
      ORDER BY spent_cents DESC
      LIMIT ?`,
-    LOCAL_USER_ID,
+    userId,
     startIso,
     endIso,
     limit
@@ -367,6 +331,7 @@ export async function getTopCategorySpending(limit = 5): Promise<CategorySpendSl
 }
 
 export async function getDailyTrendData(): Promise<DailyTrendPoint[]> {
+  const userId = await resolveUserId();
   const db = await getDbAsync();
   const { startIso, endIso } = getMonthBounds();
 
@@ -381,7 +346,7 @@ export async function getDailyTrendData(): Promise<DailyTrendPoint[]> {
        AND occurred_at BETWEEN ? AND ?
      GROUP BY day
      ORDER BY day ASC`,
-    LOCAL_USER_ID,
+    userId,
     startIso,
     endIso
   );
@@ -394,6 +359,7 @@ export async function getDailyTrendData(): Promise<DailyTrendPoint[]> {
 }
 
 export async function getBudgetProgress(period: 'monthly' | 'yearly'): Promise<BudgetProgress[]> {
+  const userId = await resolveUserId();
   const db = await getDbAsync();
 
   const rows = await db.getAllAsync<BudgetProgressRow>(
@@ -416,7 +382,7 @@ export async function getBudgetProgress(period: 'monthly' | 'yearly'): Promise<B
        AND b.period = ?
      GROUP BY b.id, b.category_id, c.name, b.period, b.amount_cents
      ORDER BY CASE WHEN b.category_id IS NULL THEN 0 ELSE 1 END, spent_cents DESC`,
-    LOCAL_USER_ID,
+    userId,
     period
   );
 
@@ -437,6 +403,7 @@ export async function getBudgetProgress(period: 'monthly' | 'yearly'): Promise<B
 }
 
 export async function getTransactions(limit = 100): Promise<TransactionRow[]> {
+  const userId = await resolveUserId();
   const db = await getDbAsync();
 
   return db.getAllAsync<TransactionRow>(
@@ -454,12 +421,13 @@ export async function getTransactions(limit = 100): Promise<TransactionRow[]> {
        AND t.deleted_at IS NULL
      ORDER BY t.occurred_at DESC
      LIMIT ?`,
-    LOCAL_USER_ID,
+    userId,
     limit
   );
 }
 
 export async function getCategoryOptions(): Promise<CategoryOptionRow[]> {
+  const userId = await resolveUserId();
   const db = await getDbAsync();
 
   return db.getAllAsync<CategoryOptionRow>(
@@ -469,11 +437,12 @@ export async function getCategoryOptions(): Promise<CategoryOptionRow[]> {
        AND deleted_at IS NULL
        AND is_archived = 0
      ORDER BY is_default DESC, name ASC`,
-    LOCAL_USER_ID
+    userId
   );
 }
 
 export async function insertTransaction(input: TransactionInput): Promise<void> {
+  const userId = await resolveUserId();
   const db = await getDbAsync();
   const now = new Date().toISOString();
 
@@ -481,7 +450,7 @@ export async function insertTransaction(input: TransactionInput): Promise<void> 
     `INSERT INTO transactions (id, user_id, type, amount_cents, occurred_at, category_id, payment_method, note, recurrence_rule_id, created_at, updated_at, deleted_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, NULL)`,
     makeId('txn'),
-    LOCAL_USER_ID,
+    userId,
     input.type,
     input.amountCents,
     input.occurredAt,

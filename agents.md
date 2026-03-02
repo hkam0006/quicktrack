@@ -54,6 +54,7 @@ This file defines design decisions and implementation guard rails for Codex and 
 
 ## Auth and Security Rules
 - Use Supabase Auth for sign-in/session management.
+- MVP auth methods are email + password only (no social login, magic link, SSO, or guest auth).
 - Do not store service-role keys or privileged secrets in client code.
 - Keep anon key in app config only.
 - Enforce ownership constraints via RLS, not client-side filtering.

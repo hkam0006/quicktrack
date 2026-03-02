@@ -10,7 +10,10 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.anonymous.quick-track"
+      "bundleIdentifier": "com.anonymous.quick-track",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -49,8 +52,12 @@
       "reactCompiler": true
     },
     "extra": {
-      "supabaseUrl": "",
-      "supabaseAnonKey": ""
+      "supabaseUrl": "http://127.0.0.1:54321",
+      "supabaseAnonKey": "sb_publishable_ACJWlzQHlZjBrEguHvfOxg_3BJgxAaH",
+      "router": {},
+      "eas": {
+        "projectId": "e97a49ba-4fbd-4d6f-b4d6-30565bfdf840"
+      }
     }
   }
 }

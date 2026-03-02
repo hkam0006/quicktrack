@@ -1,13 +1,10 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import {
-  getBudgetProgress,
-  getDailyTrendData,
-  getHomeSummary,
-  getTopCategorySpending,
-  initLocalDatabase,
+  createLocalDataRepository,
 } from '@/src/data/local/database';
 import { subscribeLocalDataChanges } from '@/src/data/local/events';
+import { useAuth } from '@/src/features/auth/auth.context';
 import type { HomeScreenData } from '@/src/features/home/home.types';
 
 const defaultHomeData: HomeScreenData = {
@@ -24,20 +21,32 @@ const defaultHomeData: HomeScreenData = {
 };
 
 export function useHomeData() {
+  const { user } = useAuth();
   const [data, setData] = useState<HomeScreenData>(defaultHomeData);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const repository = useMemo(
+    () => (user?.id ? createLocalDataRepository(user.id) : null),
+    [user?.id]
+  );
 
   const load = useCallback(async () => {
+    if (!repository) {
+      setData(defaultHomeData);
+      setError(null);
+      setLoading(false);
+      return;
+    }
+
     try {
       setError(null);
-      await initLocalDatabase();
+      await repository.initLocalDatabase();
 
       const [summary, topCategories, dailyTrend, monthlyBudgets] = await Promise.all([
-        getHomeSummary(),
-        getTopCategorySpending(),
-        getDailyTrendData(),
-        getBudgetProgress('monthly'),
+        repository.getHomeSummary(),
+        repository.getTopCategorySpending(),
+        repository.getDailyTrendData(),
+        repository.getBudgetProgress('monthly'),
       ]);
 
       const totalBudget = monthlyBudgets.find((budget) => budget.categoryId === null) ?? null;
@@ -53,7 +62,7 @@ export function useHomeData() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [repository]);
 
   useEffect(() => {
     void load();

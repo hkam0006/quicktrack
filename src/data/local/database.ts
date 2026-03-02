@@ -1,12 +1,10 @@
 import { openDatabaseAsync, type SQLiteDatabase } from 'expo-sqlite';
 
-import { supabase } from '@/src/data/remote/supabase.client';
 import { defaultCategoryDrafts } from '@/src/shared/lib/default-categories';
 import type { BudgetProgress, CategorySpendSlice, DailyTrendPoint, MonthSummary } from '@/src/shared/types';
 import { toCents } from '@/src/shared/types';
 
 const DB_NAME = 'quick-track.db';
-const FALLBACK_LOCAL_USER_ID = 'local-user';
 
 let dbPromise: Promise<SQLiteDatabase> | null = null;
 const initByUserId = new Map<string, Promise<void>>();
@@ -62,6 +60,17 @@ interface CategoryOptionRow {
   name: string;
 }
 
+export interface LocalDataRepository {
+  initLocalDatabase: () => Promise<void>;
+  getHomeSummary: () => Promise<MonthSummary>;
+  getTopCategorySpending: (limit?: number) => Promise<CategorySpendSlice[]>;
+  getDailyTrendData: () => Promise<DailyTrendPoint[]>;
+  getBudgetProgress: (period: 'monthly' | 'yearly') => Promise<BudgetProgress[]>;
+  getTransactions: (limit?: number) => Promise<TransactionRow[]>;
+  getCategoryOptions: () => Promise<CategoryOptionRow[]>;
+  insertTransaction: (input: TransactionInput) => Promise<void>;
+}
+
 const createSchemaSql = `
 PRAGMA journal_mode = WAL;
 
@@ -115,7 +124,17 @@ function getDbAsync(): Promise<SQLiteDatabase> {
   if (!dbPromise) {
     dbPromise = openDatabaseAsync(DB_NAME);
   }
+
   return dbPromise;
+}
+
+function assertUserId(userId: string): string {
+  const normalized = userId.trim();
+  if (!normalized) {
+    throw new Error('A valid authenticated user id is required for local data access.');
+  }
+
+  return normalized;
 }
 
 function makeId(prefix: string): string {
@@ -129,16 +148,8 @@ function toIsoDay(date: Date): string {
 function getMonthBounds(date = new Date()): { startIso: string; endIso: string } {
   const start = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1, 0, 0, 0, 0));
   const end = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 0, 23, 59, 59, 999));
+
   return { startIso: start.toISOString(), endIso: end.toISOString() };
-}
-
-async function resolveUserId(): Promise<string> {
-  const { data, error } = await supabase.auth.getSession();
-  if (error) {
-    return FALLBACK_LOCAL_USER_ID;
-  }
-
-  return data.session?.user?.id ?? FALLBACK_LOCAL_USER_ID;
 }
 
 async function dedupeCategories(db: SQLiteDatabase, userId: string): Promise<void> {
@@ -198,7 +209,7 @@ async function dedupeCategories(db: SQLiteDatabase, userId: string): Promise<voi
   }
 }
 
-async function seedIfNeeded(db: SQLiteDatabase, userId: string): Promise<void> {
+async function seedDefaultCategoriesIfNeeded(db: SQLiteDatabase, userId: string): Promise<void> {
   await dedupeCategories(db, userId);
 
   const categoryCount = await db.getFirstAsync<{ count: number }>(
@@ -206,42 +217,45 @@ async function seedIfNeeded(db: SQLiteDatabase, userId: string): Promise<void> {
     userId
   );
 
-  if ((categoryCount?.count ?? 0) === 0) {
-    const now = new Date().toISOString();
+  if ((categoryCount?.count ?? 0) > 0) {
+    return;
+  }
 
-    for (const category of defaultCategoryDrafts) {
-      const existingCategory = await db.getFirstAsync<{ id: string }>(
-        `SELECT id
-         FROM categories
-         WHERE user_id = ?
-           AND name = ?
-           AND deleted_at IS NULL
-         LIMIT 1`,
-        userId,
-        category.name
-      );
+  const now = new Date().toISOString();
 
-      if (existingCategory) {
-        continue;
-      }
+  // Seed only baseline categories for authenticated users.
+  // No sample/demo transactions or budgets are auto-created.
+  for (const category of defaultCategoryDrafts) {
+    const existingCategory = await db.getFirstAsync<{ id: string }>(
+      `SELECT id
+       FROM categories
+       WHERE user_id = ?
+         AND name = ?
+         AND deleted_at IS NULL
+       LIMIT 1`,
+      userId,
+      category.name
+    );
 
-      await db.runAsync(
-        `INSERT INTO categories (id, user_id, name, color, icon, is_default, is_archived, created_at, updated_at, deleted_at)
-         VALUES (?, ?, ?, ?, ?, 1, 0, ?, ?, NULL)`,
-        makeId('cat'),
-        userId,
-        category.name,
-        category.color,
-        category.icon,
-        now,
-        now
-      );
+    if (existingCategory) {
+      continue;
     }
+
+    await db.runAsync(
+      `INSERT INTO categories (id, user_id, name, color, icon, is_default, is_archived, created_at, updated_at, deleted_at)
+       VALUES (?, ?, ?, ?, ?, 1, 0, ?, ?, NULL)`,
+      makeId('cat'),
+      userId,
+      category.name,
+      category.color,
+      category.icon,
+      now,
+      now
+    );
   }
 }
 
-export async function initLocalDatabase(): Promise<void> {
-  const userId = await resolveUserId();
+async function initLocalDatabaseForUser(userId: string): Promise<void> {
   const existingInit = initByUserId.get(userId);
   if (existingInit) {
     await existingInit;
@@ -251,7 +265,7 @@ export async function initLocalDatabase(): Promise<void> {
   const initialize = (async () => {
     const db = await getDbAsync();
     await db.execAsync(createSchemaSql);
-    await seedIfNeeded(db, userId);
+    await seedDefaultCategoriesIfNeeded(db, userId);
   })();
 
   initByUserId.set(userId, initialize);
@@ -263,8 +277,7 @@ export async function initLocalDatabase(): Promise<void> {
   }
 }
 
-export async function getHomeSummary(): Promise<MonthSummary> {
-  const userId = await resolveUserId();
+async function getHomeSummaryForUser(userId: string): Promise<MonthSummary> {
   const db = await getDbAsync();
   const { startIso, endIso } = getMonthBounds();
 
@@ -293,8 +306,7 @@ export async function getHomeSummary(): Promise<MonthSummary> {
   };
 }
 
-export async function getTopCategorySpending(limit = 5): Promise<CategorySpendSlice[]> {
-  const userId = await resolveUserId();
+async function getTopCategorySpendingForUser(userId: string, limit = 5): Promise<CategorySpendSlice[]> {
   const db = await getDbAsync();
   const { startIso, endIso } = getMonthBounds();
 
@@ -330,8 +342,7 @@ export async function getTopCategorySpending(limit = 5): Promise<CategorySpendSl
   }));
 }
 
-export async function getDailyTrendData(): Promise<DailyTrendPoint[]> {
-  const userId = await resolveUserId();
+async function getDailyTrendDataForUser(userId: string): Promise<DailyTrendPoint[]> {
   const db = await getDbAsync();
   const { startIso, endIso } = getMonthBounds();
 
@@ -358,8 +369,7 @@ export async function getDailyTrendData(): Promise<DailyTrendPoint[]> {
   }));
 }
 
-export async function getBudgetProgress(period: 'monthly' | 'yearly'): Promise<BudgetProgress[]> {
-  const userId = await resolveUserId();
+async function getBudgetProgressForUser(userId: string, period: 'monthly' | 'yearly'): Promise<BudgetProgress[]> {
   const db = await getDbAsync();
 
   const rows = await db.getAllAsync<BudgetProgressRow>(
@@ -402,8 +412,7 @@ export async function getBudgetProgress(period: 'monthly' | 'yearly'): Promise<B
   });
 }
 
-export async function getTransactions(limit = 100): Promise<TransactionRow[]> {
-  const userId = await resolveUserId();
+async function getTransactionsForUser(userId: string, limit = 100): Promise<TransactionRow[]> {
   const db = await getDbAsync();
 
   return db.getAllAsync<TransactionRow>(
@@ -426,8 +435,7 @@ export async function getTransactions(limit = 100): Promise<TransactionRow[]> {
   );
 }
 
-export async function getCategoryOptions(): Promise<CategoryOptionRow[]> {
-  const userId = await resolveUserId();
+async function getCategoryOptionsForUser(userId: string): Promise<CategoryOptionRow[]> {
   const db = await getDbAsync();
 
   return db.getAllAsync<CategoryOptionRow>(
@@ -441,8 +449,7 @@ export async function getCategoryOptions(): Promise<CategoryOptionRow[]> {
   );
 }
 
-export async function insertTransaction(input: TransactionInput): Promise<void> {
-  const userId = await resolveUserId();
+async function insertTransactionForUser(userId: string, input: TransactionInput): Promise<void> {
   const db = await getDbAsync();
   const now = new Date().toISOString();
 
@@ -460,6 +467,21 @@ export async function insertTransaction(input: TransactionInput): Promise<void> 
     now,
     now
   );
+}
+
+export function createLocalDataRepository(userId: string): LocalDataRepository {
+  const scopedUserId = assertUserId(userId);
+
+  return {
+    initLocalDatabase: () => initLocalDatabaseForUser(scopedUserId),
+    getHomeSummary: () => getHomeSummaryForUser(scopedUserId),
+    getTopCategorySpending: (limit) => getTopCategorySpendingForUser(scopedUserId, limit),
+    getDailyTrendData: () => getDailyTrendDataForUser(scopedUserId),
+    getBudgetProgress: (period) => getBudgetProgressForUser(scopedUserId, period),
+    getTransactions: (limit) => getTransactionsForUser(scopedUserId, limit),
+    getCategoryOptions: () => getCategoryOptionsForUser(scopedUserId),
+    insertTransaction: (input) => insertTransactionForUser(scopedUserId, input),
+  };
 }
 
 export function formatCurrency(cents: number): string {

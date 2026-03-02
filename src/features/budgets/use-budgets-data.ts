@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
-import { formatCurrency, getBudgetProgress, initLocalDatabase } from '@/src/data/local/database';
+import { createLocalDataRepository, formatCurrency } from '@/src/data/local/database';
 import { subscribeLocalDataChanges } from '@/src/data/local/events';
+import { useAuth } from '@/src/features/auth/auth.context';
 import type { BudgetProgress } from '@/src/shared/types';
 
 export interface BudgetsData {
@@ -10,23 +11,38 @@ export interface BudgetsData {
 }
 
 export function useBudgetsData() {
+  const { user } = useAuth();
   const [data, setData] = useState<BudgetsData>({ monthly: [], yearly: [] });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const repository = useMemo(
+    () => (user?.id ? createLocalDataRepository(user.id) : null),
+    [user?.id]
+  );
 
   const load = useCallback(async () => {
+    if (!repository) {
+      setData({ monthly: [], yearly: [] });
+      setError(null);
+      setLoading(false);
+      return;
+    }
+
     try {
       setError(null);
-      await initLocalDatabase();
+      await repository.initLocalDatabase();
 
-      const [monthly, yearly] = await Promise.all([getBudgetProgress('monthly'), getBudgetProgress('yearly')]);
+      const [monthly, yearly] = await Promise.all([
+        repository.getBudgetProgress('monthly'),
+        repository.getBudgetProgress('yearly'),
+      ]);
       setData({ monthly, yearly });
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : 'Failed to load budgets');
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [repository]);
 
   useEffect(() => {
     void load();

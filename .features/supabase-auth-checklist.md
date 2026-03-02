@@ -57,12 +57,15 @@
   - Status: Completed on March 2, 2026 in auth screens using `react-hook-form` + `zod` via `@hookform/resolvers`.
 
 ## Phase 4: Local DB User Scope Refactor
-- [ ] `T4.1` Remove hardcoded `LOCAL_USER_ID` from `src/data/local/database.ts`.
+- [x] `T4.1` Remove hardcoded `LOCAL_USER_ID` from `src/data/local/database.ts`.
   - Acceptance: every query/write is scoped by active auth user id.
-- [ ] `T4.2` Introduce user-aware repository/API surface for local data access.
+  - Status: Completed on March 2, 2026 in `src/data/local/database.ts` (removed session fallback user and required explicit scoped `userId`).
+- [x] `T4.2` Introduce user-aware repository/API surface for local data access.
   - Acceptance: no screen reads/writes data without explicit current user context.
-- [ ] `T4.3` Rework seed behavior for dev-only and authenticated contexts.
+  - Status: Completed on March 2, 2026 in `src/data/local/database.ts` (`createLocalDataRepository(userId)`) and feature hooks (`src/features/home/use-home-data.ts`, `src/features/budgets/use-budgets-data.ts`, `src/features/transactions/use-transactions-data.ts`, `src/features/transactions/use-add-transaction.ts`).
+- [x] `T4.3` Rework seed behavior for dev-only and authenticated contexts.
   - Acceptance: no production user gets sample/demo data unexpectedly.
+  - Status: Completed on March 2, 2026 in `src/data/local/database.ts` (seed flow limited to baseline default categories for authenticated user scope; no demo/sample transaction or budget auto-seeding).
 
 ## Phase 5: Outbox + Sync Engine
 - [ ] `T5.1` Implement local outbox table + checkpoint table in SQLite migrations.

@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
-import { formatCurrency, getTransactions, initLocalDatabase } from '@/src/data/local/database';
+import { createLocalDataRepository, formatCurrency } from '@/src/data/local/database';
 import { subscribeLocalDataChanges } from '@/src/data/local/events';
+import { useAuth } from '@/src/features/auth/auth.context';
 
 export interface TransactionListItem {
   id: string;
@@ -14,15 +15,27 @@ export interface TransactionListItem {
 }
 
 export function useTransactionsData(query: string) {
+  const { user } = useAuth();
   const [items, setItems] = useState<TransactionListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const repository = useMemo(
+    () => (user?.id ? createLocalDataRepository(user.id) : null),
+    [user?.id]
+  );
 
   const load = useCallback(async () => {
+    if (!repository) {
+      setItems([]);
+      setError(null);
+      setLoading(false);
+      return;
+    }
+
     try {
       setError(null);
-      await initLocalDatabase();
-      const rows = await getTransactions(200);
+      await repository.initLocalDatabase();
+      const rows = await repository.getTransactions(200);
 
       setItems(
         rows.map((row) => ({
@@ -40,7 +53,7 @@ export function useTransactionsData(query: string) {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [repository]);
 
   useEffect(() => {
     void load();

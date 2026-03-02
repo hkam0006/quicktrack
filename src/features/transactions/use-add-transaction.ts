@@ -1,12 +1,11 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import {
-  getCategoryOptions,
-  initLocalDatabase,
-  insertTransaction,
+  createLocalDataRepository,
   type TransactionInput,
 } from '@/src/data/local/database';
 import { notifyLocalDataChanged } from '@/src/data/local/events';
+import { useAuth } from '@/src/features/auth/auth.context';
 
 export interface CategoryOption {
   id: string;
@@ -32,15 +31,25 @@ const initialState: AddTransactionFormState = {
 };
 
 export function useAddTransaction() {
+  const { user } = useAuth();
   const [form, setForm] = useState<AddTransactionFormState>(initialState);
   const [categories, setCategories] = useState<CategoryOption[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const repository = useMemo(
+    () => (user?.id ? createLocalDataRepository(user.id) : null),
+    [user?.id]
+  );
 
   useEffect(() => {
     async function load() {
-      await initLocalDatabase();
-      const options = await getCategoryOptions();
+      if (!repository) {
+        setCategories([]);
+        return;
+      }
+
+      await repository.initLocalDatabase();
+      const options = await repository.getCategoryOptions();
       setCategories(options);
       if (!form.categoryId && options.length > 0) {
         setForm((prev) => ({ ...prev, categoryId: options[0].id }));
@@ -48,7 +57,7 @@ export function useAddTransaction() {
     }
 
     void load();
-  }, [form.categoryId]);
+  }, [form.categoryId, repository]);
 
   const update = useCallback((patch: Partial<AddTransactionFormState>) => {
     setForm((prev) => ({ ...prev, ...patch }));
@@ -75,8 +84,14 @@ export function useAddTransaction() {
     setSaving(true);
     setError(null);
 
+    if (!repository) {
+      setError('You must be signed in to add a transaction.');
+      setSaving(false);
+      return false;
+    }
+
     try {
-      await insertTransaction(payload);
+      await repository.insertTransaction(payload);
       notifyLocalDataChanged();
       setForm(initialState);
       return true;
@@ -86,7 +101,7 @@ export function useAddTransaction() {
     } finally {
       setSaving(false);
     }
-  }, [form]);
+  }, [form, repository]);
 
   return {
     form,

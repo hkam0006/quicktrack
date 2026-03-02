@@ -23,6 +23,8 @@ export default function HomeScreen() {
   const [selectedCategoryIndex, setSelectedCategoryIndex] = useState(0);
   const pieMotion = useRef(new Animated.Value(0)).current;
   const trendMotion = useRef(new Animated.Value(0)).current;
+  const pieSelectMotion = useRef(new Animated.Value(1)).current;
+  const centerLabelMotion = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
     AccessibilityInfo.isReduceMotionEnabled().then(setReduceMotion);
@@ -60,15 +62,45 @@ export default function HomeScreen() {
     }
   }, [data.topCategories.length, selectedCategoryIndex]);
 
+  useEffect(() => {
+    if (reduceMotion) {
+      pieSelectMotion.setValue(1);
+      centerLabelMotion.setValue(1);
+      return;
+    }
+
+    pieSelectMotion.setValue(0.96);
+    centerLabelMotion.setValue(0);
+
+    Animated.parallel([
+      Animated.spring(pieSelectMotion, {
+        toValue: 1,
+        stiffness: 260,
+        damping: 20,
+        mass: 0.9,
+        useNativeDriver: true,
+      }),
+      Animated.timing(centerLabelMotion, {
+        toValue: 1,
+        duration: 280,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, [centerLabelMotion, pieSelectMotion, reduceMotion, selectedCategoryIndex]);
+
   const pieData = useMemo(
     () =>
       data.topCategories.map((category, index) => ({
         value: category.spentCents,
         color: category.color,
         text: `${Math.round(category.percentOfTotal)}%`,
-        gradientCenterColor: darkThemeTokens.surfaceAlt,
+        gradientCenterColor: category.color,
         focused: index === selectedCategoryIndex,
-        onPress: () => setSelectedCategoryIndex(index),
+        onPress: () =>
+          setSelectedCategoryIndex((currentIndex) =>
+            currentIndex === index ? -1 : index,
+          ),
       })),
     [data.topCategories, selectedCategoryIndex],
   );
@@ -139,7 +171,14 @@ export default function HomeScreen() {
                 },
               ]}
             >
-              <View style={styles.pieChartCenter}>
+              <Animated.View
+                style={[
+                  styles.pieChartCenter,
+                  {
+                    transform: [{ scale: pieSelectMotion }],
+                  },
+                ]}
+              >
                 <PieChart
                   data={pieData}
                   donut
@@ -152,14 +191,33 @@ export default function HomeScreen() {
                   showGradient
                   focusOnPress
                   selectedIndex={selectedCategoryIndex}
-                  setSelectedIndex={setSelectedCategoryIndex}
+                  setSelectedIndex={(index: number) =>
+                    setSelectedCategoryIndex((currentIndex) =>
+                      currentIndex === index ? -1 : index,
+                    )
+                  }
                   edgesRadius={20}
                   showTextBackground
                   textBackgroundColor={darkThemeTokens.surfaceAlt}
                   textBackgroundRadius={10}
                   centerLabelComponent={() =>
                     selectedCategory ? (
-                      <View style={styles.centerLabelWrap}>
+                      <Animated.View
+                        style={[
+                          styles.centerLabelWrap,
+                          {
+                            opacity: centerLabelMotion,
+                            transform: [
+                              {
+                                translateY: centerLabelMotion.interpolate({
+                                  inputRange: [0, 1],
+                                  outputRange: [6, 0],
+                                }),
+                              },
+                            ],
+                          },
+                        ]}
+                      >
                         <Text style={styles.centerLabelTitle}>
                           {Math.round(selectedCategory.percentOfTotal)}%
                         </Text>
@@ -169,13 +227,38 @@ export default function HomeScreen() {
                         >
                           {selectedCategory.categoryName}
                         </Text>
-                      </View>
-                    ) : null
+                      </Animated.View>
+                    ) : (
+                      <Animated.View
+                        style={[
+                          styles.centerLabelWrap,
+                          {
+                            opacity: centerLabelMotion,
+                            transform: [
+                              {
+                                translateY: centerLabelMotion.interpolate({
+                                  inputRange: [0, 1],
+                                  outputRange: [6, 0],
+                                }),
+                              },
+                            ],
+                          },
+                        ]}
+                      >
+                        <Text style={styles.centerLabelTitle}>${(data.summary.spentCents / 100).toFixed(2)}</Text>
+                        <Text style={styles.centerLabelSubtitle}>
+                          {new Date(data.summary.monthStart).toLocaleDateString('en-AU', {
+                            month: 'long',
+                            year: 'numeric',
+                          })}
+                        </Text>
+                      </Animated.View>
+                    )
                   }
                   isAnimated={!reduceMotion}
                   animationDuration={760}
                 />
-              </View>
+              </Animated.View>
               <View style={styles.legendList}>
                 {pieLegendItems.map((category) => {
                   const categoryIndex = data.topCategories.findIndex(
@@ -185,14 +268,16 @@ export default function HomeScreen() {
 
                   return (
                     <Pressable
-                    key={category.categoryId ?? "uncategorized"}
+                      key={category.categoryId ?? "uncategorized"}
                       style={[
                         styles.legendItem,
                         isSelected ? styles.legendItemSelected : null,
                       ]}
                       onPress={() => {
                         if (categoryIndex >= 0) {
-                          setSelectedCategoryIndex(categoryIndex);
+                          setSelectedCategoryIndex((currentIndex) =>
+                            currentIndex === categoryIndex ? -1 : categoryIndex,
+                          );
                         }
                       }}
                     >
@@ -401,6 +486,16 @@ const styles = StyleSheet.create({
   centerLabelSubtitle: {
     color: darkThemeTokens.textSecondary,
     fontSize: 12,
+    fontWeight: "600",
+  },
+  centerLabelEmptyTitle: {
+    color: darkThemeTokens.textSecondary,
+    fontSize: 20,
+    fontWeight: "700",
+  },
+  centerLabelEmptySubtitle: {
+    color: darkThemeTokens.textSecondary,
+    fontSize: 11,
     fontWeight: "600",
   },
   errorText: {

@@ -1,10 +1,12 @@
 import { DarkTheme, ThemeProvider } from '@react-navigation/native';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { ActivityIndicator, View } from 'react-native';
 import 'react-native-reanimated';
 
+import { useSyncTriggers } from '@/src/data/sync/use-sync-triggers';
+import { getRuntimeEnv } from '@/src/shared/lib/env';
 import { AuthProvider, useAuth } from '@/src/features/auth/auth.context';
 import { darkThemeTokens } from '@/src/shared/theme/tokens';
 
@@ -15,7 +17,44 @@ export const unstable_settings = {
 function RootNavigator() {
   const router = useRouter();
   const segments = useSegments();
-  const { session, isLoading } = useAuth();
+  const { session, isLoading, user, signOut } = useAuth();
+  const signingOutForMissingSessionRef = useRef(false);
+
+  useSyncTriggers(user?.id);
+
+  useEffect(() => {
+    if (isLoading || session || signingOutForMissingSessionRef.current) {
+      return;
+    }
+
+    let mounted = true;
+
+    const ensureSignedOutWhenOnline = async () => {
+      const { supabaseUrl } = getRuntimeEnv();
+
+      try {
+        const response = await fetch(supabaseUrl, { method: 'HEAD' });
+        if (!mounted || !response.ok) {
+          return;
+        }
+      } catch {
+        return;
+      }
+
+      signingOutForMissingSessionRef.current = true;
+      try {
+        await signOut();
+      } finally {
+        signingOutForMissingSessionRef.current = false;
+      }
+    };
+
+    void ensureSignedOutWhenOnline();
+
+    return () => {
+      mounted = false;
+    };
+  }, [isLoading, session, signOut]);
 
   useEffect(() => {
     if (isLoading) {

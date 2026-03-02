@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ActivityIndicator, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { useTransactionsData } from '@/src/features/transactions/use-transactions-data';
 import { darkThemeTokens } from '@/src/shared/theme/tokens';
@@ -7,11 +7,23 @@ import { AddExpenseFab } from '@/src/shared/ui/add-expense-fab';
 
 export default function TransactionsScreen() {
   const [query, setQuery] = useState('');
-  const { items, loading, error, formatCurrency } = useTransactionsData(query);
+  const [refreshing, setRefreshing] = useState(false);
+  const { items, loading, error, refresh, formatCurrency } = useTransactionsData(query);
+
+  const onRefresh = React.useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await refresh();
+    } finally {
+      setRefreshing(false);
+    }
+  }, [refresh]);
 
   return (
     <View style={styles.screen}>
-      <ScrollView contentContainerStyle={styles.content}>
+      <ScrollView
+        contentContainerStyle={styles.content}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}>
         <Text style={styles.title}>Transactions</Text>
 
       <View style={styles.card}>

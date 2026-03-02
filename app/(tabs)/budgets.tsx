@@ -4,6 +4,7 @@ import {
   ActivityIndicator,
   Animated,
   Easing,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -16,8 +17,9 @@ import { darkThemeTokens } from '@/src/shared/theme/tokens';
 import { AddExpenseFab } from '@/src/shared/ui/add-expense-fab';
 
 export default function BudgetsScreen() {
-  const { data, monthlyOverall, loading, error, formatCurrency } = useBudgetsData();
+  const { data, monthlyOverall, loading, error, refresh, formatCurrency } = useBudgetsData();
   const [reduceMotion, setReduceMotion] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const chartMotion = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
@@ -70,9 +72,20 @@ export default function BudgetsScreen() {
 
   const yearlyOverall = data.yearly.find((item) => item.categoryId === null) ?? null;
 
+  const onRefresh = React.useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await refresh();
+    } finally {
+      setRefreshing(false);
+    }
+  }, [refresh]);
+
   return (
     <View style={styles.screen}>
-      <ScrollView contentContainerStyle={styles.content}>
+      <ScrollView
+        contentContainerStyle={styles.content}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}>
         <Text style={styles.title}>Budgets</Text>
 
       <View style={styles.card}>

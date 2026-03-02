@@ -5,6 +5,7 @@ import {
   type TransactionInput,
 } from '@/src/data/local/database';
 import { notifyLocalDataChanged } from '@/src/data/local/events';
+import { triggerSyncNow } from '@/src/data/sync/sync.service';
 import { useAuth } from '@/src/features/auth/auth.context';
 
 export interface CategoryOption {
@@ -32,13 +33,14 @@ const initialState: AddTransactionFormState = {
 
 export function useAddTransaction() {
   const { user } = useAuth();
+  const userId = user?.id ?? null;
   const [form, setForm] = useState<AddTransactionFormState>(initialState);
   const [categories, setCategories] = useState<CategoryOption[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const repository = useMemo(
-    () => (user?.id ? createLocalDataRepository(user.id) : null),
-    [user?.id]
+    () => (userId ? createLocalDataRepository(userId) : null),
+    [userId]
   );
 
   useEffect(() => {
@@ -84,7 +86,7 @@ export function useAddTransaction() {
     setSaving(true);
     setError(null);
 
-    if (!repository) {
+    if (!repository || !userId) {
       setError('You must be signed in to add a transaction.');
       setSaving(false);
       return false;
@@ -93,6 +95,7 @@ export function useAddTransaction() {
     try {
       await repository.insertTransaction(payload);
       notifyLocalDataChanged();
+      void triggerSyncNow(userId);
       setForm(initialState);
       return true;
     } catch (saveError) {
@@ -101,7 +104,7 @@ export function useAddTransaction() {
     } finally {
       setSaving(false);
     }
-  }, [form, repository]);
+  }, [form, repository, userId]);
 
   return {
     form,

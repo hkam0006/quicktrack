@@ -4,6 +4,7 @@ import {
   createLocalDataRepository,
 } from '@/src/data/local/database';
 import { subscribeLocalDataChanges } from '@/src/data/local/events';
+import { triggerSyncNow } from '@/src/data/sync/sync.service';
 import { useAuth } from '@/src/features/auth/auth.context';
 import type { HomeScreenData } from '@/src/features/home/home.types';
 
@@ -22,16 +23,17 @@ const defaultHomeData: HomeScreenData = {
 
 export function useHomeData() {
   const { user } = useAuth();
+  const userId = user?.id ?? null;
   const [data, setData] = useState<HomeScreenData>(defaultHomeData);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const repository = useMemo(
-    () => (user?.id ? createLocalDataRepository(user.id) : null),
-    [user?.id]
+    () => (userId ? createLocalDataRepository(userId) : null),
+    [userId]
   );
 
   const load = useCallback(async () => {
-    if (!repository) {
+    if (!repository || !userId) {
       setData(defaultHomeData);
       setError(null);
       setLoading(false);
@@ -41,6 +43,7 @@ export function useHomeData() {
     try {
       setError(null);
       await repository.initLocalDatabase();
+      await triggerSyncNow(userId);
 
       const [summary, topCategories, dailyTrend, monthlyBudgets] = await Promise.all([
         repository.getHomeSummary(),
@@ -62,7 +65,7 @@ export function useHomeData() {
     } finally {
       setLoading(false);
     }
-  }, [repository]);
+  }, [repository, userId]);
 
   useEffect(() => {
     void load();

@@ -5,6 +5,7 @@ import {
   Animated,
   Easing,
   Pressable,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -18,9 +19,10 @@ import { darkThemeTokens } from "@/src/shared/theme/tokens";
 import { AddExpenseFab } from "@/src/shared/ui/add-expense-fab";
 
 export default function HomeScreen() {
-  const { data, loading, error } = useHomeData();
+  const { data, loading, error, refresh } = useHomeData();
   const [reduceMotion, setReduceMotion] = useState(false);
-  const [selectedCategoryIndex, setSelectedCategoryIndex] = useState(0);
+  const [refreshing, setRefreshing] = useState(false);
+  const [selectedCategoryIndex, setSelectedCategoryIndex] = useState(-1);
   const pieMotion = useRef(new Animated.Value(0)).current;
   const trendMotion = useRef(new Animated.Value(0)).current;
   const pieSelectMotion = useRef(new Animated.Value(1)).current;
@@ -120,9 +122,20 @@ export default function HomeScreen() {
   const pieLegendItems = data.topCategories.slice(0, 6);
   const selectedCategory = data.topCategories[selectedCategoryIndex] ?? null;
 
+  const onRefresh = React.useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await refresh();
+    } finally {
+      setRefreshing(false);
+    }
+  }, [refresh]);
+
   return (
     <View style={styles.screen}>
-      <ScrollView contentContainerStyle={styles.content}>
+      <ScrollView
+        contentContainerStyle={styles.content}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}>
         <Text style={styles.title}>Home</Text>
 
         <View style={styles.card}>
@@ -355,8 +368,6 @@ export default function HomeScreen() {
                 spacing={22}
                 initialSpacing={8}
                 isAnimated={!reduceMotion}
-                animationDuration={920}
-                animateOnDataChange={!reduceMotion}
                 onDataChangeAnimationDuration={540}
                 curved
               />

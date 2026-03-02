@@ -68,18 +68,24 @@
   - Status: Completed on March 2, 2026 in `src/data/local/database.ts` (seed flow limited to baseline default categories for authenticated user scope; no demo/sample transaction or budget auto-seeding).
 
 ## Phase 5: Outbox + Sync Engine
-- [ ] `T5.1` Implement local outbox table + checkpoint table in SQLite migrations.
+- [x] `T5.1` Implement local outbox table + checkpoint table in SQLite migrations.
   - Acceptance: schema stores mutation type, payload, retries, last error, timestamps.
-- [ ] `T5.2` Update write flows (transactions/categories/budgets/recurrence) to local-first + enqueue mutation.
+  - Status: Completed on March 2, 2026 in `src/data/local/database.ts` (`outbox` + `sync_checkpoints` schema with retries, error fields, and sync timestamps).
+- [x] `T5.2` Update write flows (transactions/categories/budgets/recurrence) to local-first + enqueue mutation.
   - Acceptance: UI returns success immediately when offline.
-- [ ] `T5.3` Implement push sync processor from outbox to Supabase.
+  - Status: Completed on March 2, 2026 in `src/data/local/database.ts` (`insertTransaction` now local-first + outbox enqueue) and `src/data/sync/sync.service.ts` (generic outbox push support for all sync tables).
+- [x] `T5.3` Implement push sync processor from outbox to Supabase.
   - Acceptance: successful mutations are marked complete; failures increment retry + store error.
-- [ ] `T5.4` Implement pull sync by `updated_at` checkpoint.
+  - Status: Completed on March 2, 2026 in `src/data/sync/sync.service.ts` and `src/data/local/database.ts` (push worker marks completion/failure and tracks retries/errors).
+- [x] `T5.4` Implement pull sync by `updated_at` checkpoint.
   - Acceptance: local DB updates from remote deltas without full refetch.
-- [ ] `T5.5` Implement conflict policy (last-write-wins by `updated_at`).
+  - Status: Completed on March 2, 2026 in `src/data/sync/sync.service.ts` and `src/data/local/database.ts` (table-by-table pull using checkpoint `last_pulled_at` and row upserts).
+- [x] `T5.5` Implement conflict policy (last-write-wins by `updated_at`).
   - Acceptance: deterministic merge outcomes for conflicting records.
-- [ ] `T5.6` Wire sync triggers (foreground, reconnect, manual refresh).
+  - Status: Completed on March 2, 2026 in `src/data/local/database.ts` (`ON CONFLICT ... WHERE excluded.updated_at >= local.updated_at` for deterministic LWW merges).
+- [x] `T5.6` Wire sync triggers (foreground, reconnect, manual refresh).
   - Acceptance: sync attempts fire on all three trigger points.
+  - Status: Completed on March 2, 2026 in `src/data/sync/use-sync-triggers.ts`, `app/_layout.tsx`, and key tab screens (`app/(tabs)/index.tsx`, `app/(tabs)/transactions.tsx`, `app/(tabs)/budgets.tsx`) with app foreground, reconnect polling, and pull-to-refresh trigger wiring.
 
 ## Phase 6: UX + Observability
 - [ ] `T6.1` Add unobtrusive sync status indicator in key tabs.

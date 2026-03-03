@@ -28,6 +28,16 @@ export interface TransactionInput {
   note: string | null;
 }
 
+export interface BudgetInput {
+  period: 'monthly' | 'yearly';
+  amountCents: number;
+  categoryId: string | null;
+  startDate: string;
+  endDate: string;
+  alertAt80Percent: boolean;
+  alertAt100Percent: boolean;
+}
+
 interface TransactionEditRow {
   id: string;
   type: 'expense' | 'income';
@@ -47,6 +57,21 @@ interface TransactionSyncMetaRow {
   note: string | null;
   created_at: string;
   recurrence_rule_id: string | null;
+}
+
+interface BudgetEditRow {
+  id: string;
+  period: 'monthly' | 'yearly';
+  amount_cents: number;
+  category_id: string | null;
+  start_date: string;
+  end_date: string;
+  alert_at_80_percent: number;
+  alert_at_100_percent: number;
+}
+
+interface BudgetSyncMetaRow {
+  created_at: string;
 }
 
 interface SumRow {
@@ -72,6 +97,7 @@ interface BudgetProgressRow {
   category_id: string | null;
   category_name: string;
   period: 'monthly' | 'yearly';
+  start_date: string;
   amount_cents: number;
   spent_cents: number;
 }
@@ -225,9 +251,12 @@ export interface LocalDataRepository {
   getBudgetProgress: (period: 'monthly' | 'yearly') => Promise<BudgetProgress[]>;
   getTransactions: (limit?: number) => Promise<TransactionRow[]>;
   getTransactionById: (transactionId: string) => Promise<TransactionEditRow | null>;
+  getBudgetById: (budgetId: string) => Promise<BudgetEditRow | null>;
   getCategoryOptions: () => Promise<CategoryOptionRow[]>;
   insertTransaction: (input: TransactionInput) => Promise<void>;
   updateTransaction: (transactionId: string, input: TransactionInput) => Promise<void>;
+  insertBudget: (input: BudgetInput) => Promise<void>;
+  updateBudget: (budgetId: string, input: BudgetInput) => Promise<void>;
   softDeleteTransaction: (transactionId: string) => Promise<void>;
   getPendingMutations: (limit?: number) => Promise<OutboxMutation[]>;
   markMutationComplete: (mutationId: string) => Promise<void>;
@@ -522,6 +551,7 @@ async function getBudgetProgressForUser(userId: string, period: 'monthly' | 'yea
       b.category_id,
       COALESCE(c.name, 'Overall') as category_name,
       b.period,
+      b.start_date,
       b.amount_cents,
       COALESCE(SUM(CASE WHEN t.type = 'expense' THEN t.amount_cents ELSE 0 END), 0) as spent_cents
      FROM budgets b
@@ -534,7 +564,7 @@ async function getBudgetProgressForUser(userId: string, period: 'monthly' | 'yea
      WHERE b.user_id = ?
        AND b.deleted_at IS NULL
        AND b.period = ?
-     GROUP BY b.id, b.category_id, c.name, b.period, b.amount_cents
+     GROUP BY b.id, b.category_id, c.name, b.period, b.start_date, b.amount_cents
      ORDER BY CASE WHEN b.category_id IS NULL THEN 0 ELSE 1 END, spent_cents DESC`,
     userId,
     period
@@ -546,7 +576,9 @@ async function getBudgetProgressForUser(userId: string, period: 'monthly' | 'yea
     return {
       budgetId: row.id,
       categoryId: row.category_id,
+      categoryName: row.category_name,
       period: row.period,
+      startDate: row.start_date,
       budgetCents: toCents(row.amount_cents),
       spentCents: toCents(row.spent_cents),
       remainingCents: toCents(Math.max(row.amount_cents - row.spent_cents, 0)),
@@ -599,6 +631,31 @@ async function getTransactionByIdForUser(userId: string, transactionId: string):
      LIMIT 1`,
     userId,
     transactionId
+  );
+
+  return row ?? null;
+}
+
+async function getBudgetByIdForUser(userId: string, budgetId: string): Promise<BudgetEditRow | null> {
+  const db = await getDbAsync();
+
+  const row = await db.getFirstAsync<BudgetEditRow>(
+    `SELECT
+      id,
+      period,
+      amount_cents,
+      category_id,
+      start_date,
+      end_date,
+      alert_at_80_percent,
+      alert_at_100_percent
+     FROM budgets
+     WHERE user_id = ?
+       AND id = ?
+       AND deleted_at IS NULL
+     LIMIT 1`,
+    userId,
+    budgetId
   );
 
   return row ?? null;
@@ -732,6 +789,103 @@ async function updateTransactionForUser(userId: string, transactionId: string, i
     payment_method: input.paymentMethod,
     note: input.note,
     recurrence_rule_id: existing.recurrence_rule_id,
+    created_at: existing.created_at,
+    updated_at: now,
+    deleted_at: null,
+  });
+}
+
+async function insertBudgetForUser(userId: string, input: BudgetInput): Promise<void> {
+  const db = await getDbAsync();
+  const now = nowIso();
+  const id = makeId();
+
+  await db.runAsync(
+    `INSERT INTO budgets (id, user_id, period, amount_cents, category_id, start_date, end_date, alert_at_80_percent, alert_at_100_percent, created_at, updated_at, deleted_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
+    id,
+    userId,
+    input.period,
+    input.amountCents,
+    input.categoryId,
+    input.startDate,
+    input.endDate,
+    input.alertAt80Percent ? 1 : 0,
+    input.alertAt100Percent ? 1 : 0,
+    now,
+    now
+  );
+
+  await enqueueMutation(db, userId, 'budgets', 'create', id, {
+    id,
+    user_id: userId,
+    budget_period: input.period,
+    amount_cents: input.amountCents,
+    category_id: input.categoryId,
+    start_date: input.startDate,
+    end_date: input.endDate,
+    alert_at_80_percent: input.alertAt80Percent,
+    alert_at_100_percent: input.alertAt100Percent,
+    created_at: now,
+    updated_at: now,
+    deleted_at: null,
+  });
+}
+
+async function updateBudgetForUser(userId: string, budgetId: string, input: BudgetInput): Promise<void> {
+  const db = await getDbAsync();
+  const now = nowIso();
+
+  const existing = await db.getFirstAsync<BudgetSyncMetaRow>(
+    `SELECT created_at
+     FROM budgets
+     WHERE user_id = ?
+       AND id = ?
+       AND deleted_at IS NULL
+     LIMIT 1`,
+    userId,
+    budgetId
+  );
+
+  if (!existing) {
+    throw new Error('Budget not found.');
+  }
+
+  await db.runAsync(
+    `UPDATE budgets
+     SET period = ?,
+         amount_cents = ?,
+         category_id = ?,
+         start_date = ?,
+         end_date = ?,
+         alert_at_80_percent = ?,
+         alert_at_100_percent = ?,
+         updated_at = ?
+     WHERE user_id = ?
+       AND id = ?
+       AND deleted_at IS NULL`,
+    input.period,
+    input.amountCents,
+    input.categoryId,
+    input.startDate,
+    input.endDate,
+    input.alertAt80Percent ? 1 : 0,
+    input.alertAt100Percent ? 1 : 0,
+    now,
+    userId,
+    budgetId
+  );
+
+  await enqueueMutation(db, userId, 'budgets', 'update', budgetId, {
+    id: budgetId,
+    user_id: userId,
+    budget_period: input.period,
+    amount_cents: input.amountCents,
+    category_id: input.categoryId,
+    start_date: input.startDate,
+    end_date: input.endDate,
+    alert_at_80_percent: input.alertAt80Percent,
+    alert_at_100_percent: input.alertAt100Percent,
     created_at: existing.created_at,
     updated_at: now,
     deleted_at: null,
@@ -1156,9 +1310,12 @@ export function createLocalDataRepository(userId: string): LocalDataRepository {
     getBudgetProgress: (period) => getBudgetProgressForUser(scopedUserId, period),
     getTransactions: (limit) => getTransactionsForUser(scopedUserId, limit),
     getTransactionById: (transactionId) => getTransactionByIdForUser(scopedUserId, transactionId),
+    getBudgetById: (budgetId) => getBudgetByIdForUser(scopedUserId, budgetId),
     getCategoryOptions: () => getCategoryOptionsForUser(scopedUserId),
     insertTransaction: (input) => insertTransactionForUser(scopedUserId, input),
     updateTransaction: (transactionId, input) => updateTransactionForUser(scopedUserId, transactionId, input),
+    insertBudget: (input) => insertBudgetForUser(scopedUserId, input),
+    updateBudget: (budgetId, input) => updateBudgetForUser(scopedUserId, budgetId, input),
     softDeleteTransaction: (transactionId) => softDeleteTransactionForUser(scopedUserId, transactionId),
     getPendingMutations: (limit) => getPendingMutationsForUser(scopedUserId, limit),
     markMutationComplete: (mutationId) => markMutationCompleteForUser(scopedUserId, mutationId),

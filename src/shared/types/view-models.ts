@@ -25,7 +25,9 @@ export interface DailyTrendPoint {
 export interface BudgetProgress {
   budgetId: UUID;
   categoryId: UUID | null;
+  categoryName: string;
   period: 'monthly' | 'yearly';
+  startDate: ISODateString;
   budgetCents: Cents;
   spentCents: Cents;
   remainingCents: Cents;

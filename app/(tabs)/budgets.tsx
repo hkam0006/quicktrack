@@ -1,9 +1,11 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import {
   AccessibilityInfo,
   ActivityIndicator,
   Animated,
   Easing,
+  Pressable,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -12,16 +14,22 @@ import {
 } from 'react-native';
 import { BarChart } from 'react-native-gifted-charts';
 
+import { BudgetSheet } from '@/src/features/budgets/budget-sheet';
 import { useBudgetsData } from '@/src/features/budgets/use-budgets-data';
-import { TransactionSheet } from '@/src/features/transactions/transaction-sheet';
 import { darkThemeTokens } from '@/src/shared/theme/tokens';
-import { AddExpenseFab } from '@/src/shared/ui/add-expense-fab';
+
+const monthYearFormatter = new Intl.DateTimeFormat('en-AU', {
+  month: 'short',
+  year: 'numeric',
+  timeZone: 'UTC',
+});
 
 export default function BudgetsScreen() {
   const { data, monthlyOverall, loading, error, refresh, formatCurrency } = useBudgetsData();
   const [reduceMotion, setReduceMotion] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [sheetVisible, setSheetVisible] = useState(false);
+  const [activeBudgetId, setActiveBudgetId] = useState<string | null>(null);
   const chartMotion = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
@@ -53,6 +61,19 @@ export default function BudgetsScreen() {
     return 'On track';
   };
 
+  const formatBudgetPeriodLabel = (period: 'monthly' | 'yearly', startDate: string) => {
+    const parsed = new Date(startDate);
+    if (Number.isNaN(parsed.getTime())) {
+      return period === 'monthly' ? 'Monthly' : 'Yearly';
+    }
+
+    if (period === 'monthly') {
+      return monthYearFormatter.format(parsed);
+    }
+
+    return String(parsed.getUTCFullYear());
+  };
+
   const monthlyCategoryBars = useMemo(
     () =>
       data.monthly
@@ -70,9 +91,25 @@ export default function BudgetsScreen() {
         })),
     [data.monthly]
   );
-  const monthlyCategorySummary = data.monthly.filter((item) => item.categoryId !== null).slice(0, 6);
 
+  const monthlyCategorySummary = data.monthly.filter((item) => item.categoryId !== null).slice(0, 6);
   const yearlyOverall = data.yearly.find((item) => item.categoryId === null) ?? null;
+  const editableBudgets = useMemo(
+    () =>
+      [...data.monthly, ...data.yearly].sort((a, b) => {
+        if (a.period !== b.period) {
+          return a.period === 'monthly' ? -1 : 1;
+        }
+        if (a.categoryId === null && b.categoryId !== null) {
+          return -1;
+        }
+        if (a.categoryId !== null && b.categoryId === null) {
+          return 1;
+        }
+        return b.spentCents - a.spentCents;
+      }),
+    [data.monthly, data.yearly]
+  );
 
   const onRefresh = React.useCallback(async () => {
     setRefreshing(true);
@@ -88,105 +125,166 @@ export default function BudgetsScreen() {
       <ScrollView
         contentContainerStyle={styles.content}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}>
-        <Text style={styles.title}>Budgets</Text>
+        <View style={styles.titleRow}>
+          <Text style={styles.title}>Budgets</Text>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Add budget"
+            hitSlop={10}
+            onPress={() => {
+              setActiveBudgetId(null);
+              setSheetVisible(true);
+            }}>
+            <MaterialIcons name="add-circle-outline" size={29} color={darkThemeTokens.accent} />
+          </Pressable>
+        </View>
 
-      <View style={styles.card}>
-        <Text style={styles.label}>Overall monthly budget</Text>
-        {monthlyOverall ? (
-          <>
-            <Text style={styles.value}>
-              {formatCurrency(monthlyOverall.spentCents)} / {formatCurrency(monthlyOverall.budgetCents)}
-            </Text>
-            <Text style={styles.muted}>Remaining {formatCurrency(monthlyOverall.remainingCents)}</Text>
-          </>
-        ) : (
-          <Text style={styles.muted}>No monthly budget configured.</Text>
-        )}
-      </View>
+        <Pressable
+          disabled={!monthlyOverall}
+          style={[styles.card, !monthlyOverall ? styles.cardDisabled : null]}
+          onPress={() => {
+            if (!monthlyOverall) return;
+            setActiveBudgetId(monthlyOverall.budgetId);
+            setSheetVisible(true);
+          }}>
+          <Text style={styles.label}>Overall monthly budget</Text>
+          {monthlyOverall ? (
+            <>
+              <Text style={styles.value}>
+                {formatCurrency(monthlyOverall.spentCents)} / {formatCurrency(monthlyOverall.budgetCents)}
+              </Text>
+              <Text style={styles.muted}>Remaining {formatCurrency(monthlyOverall.remainingCents)}</Text>
+            </>
+          ) : (
+            <Text style={styles.muted}>No monthly budget configured.</Text>
+          )}
+        </Pressable>
 
-      <View style={styles.card}>
-        <Text style={styles.label}>Overall yearly budget</Text>
-        {yearlyOverall ? (
-          <>
-            <Text style={styles.value}>
-              {formatCurrency(yearlyOverall.spentCents)} / {formatCurrency(yearlyOverall.budgetCents)}
-            </Text>
-            <Text style={styles.muted}>Remaining {formatCurrency(yearlyOverall.remainingCents)}</Text>
-          </>
-        ) : (
-          <Text style={styles.muted}>No yearly budget configured.</Text>
-        )}
-      </View>
+        <Pressable
+          disabled={!yearlyOverall}
+          style={[styles.card, !yearlyOverall ? styles.cardDisabled : null]}
+          onPress={() => {
+            if (!yearlyOverall) return;
+            setActiveBudgetId(yearlyOverall.budgetId);
+            setSheetVisible(true);
+          }}>
+          <Text style={styles.label}>Overall yearly budget</Text>
+          {yearlyOverall ? (
+            <>
+              <Text style={styles.value}>
+                {formatCurrency(yearlyOverall.spentCents)} / {formatCurrency(yearlyOverall.budgetCents)}
+              </Text>
+              <Text style={styles.muted}>Remaining {formatCurrency(yearlyOverall.remainingCents)}</Text>
+            </>
+          ) : (
+            <Text style={styles.muted}>No yearly budget configured.</Text>
+          )}
+        </Pressable>
 
-      <View style={styles.card}>
-        <Text style={styles.label}>Category utilization (%)</Text>
-        {monthlyCategoryBars.length > 0 ? (
-          <Animated.View
-            style={[
-              styles.chartFrame,
-              {
-                opacity: chartMotion,
-                transform: [
-                  {
-                    translateY: chartMotion.interpolate({
-                      inputRange: [0, 1],
-                      outputRange: [18, 0],
-                    }),
-                  },
-                ],
-              },
-            ]}>
-            <View style={styles.barChartCenter}>
-              <BarChart
-                data={monthlyCategoryBars}
-                barWidth={19}
-                spacing={18}
-                initialSpacing={12}
-                barBorderRadius={9}
-                roundedTop
-                showGradient
-                gradientColor={darkThemeTokens.surfaceAlt}
-                hideRules={false}
-                rulesColor={darkThemeTokens.surfaceAlt}
-                rulesType='dashed'
-                dashWidth={5}
-                dashGap={4}
-                xAxisColor={darkThemeTokens.surfaceAlt}
-                yAxisColor={darkThemeTokens.surfaceAlt}
-                yAxisTextStyle={styles.chartAxisText}
-                xAxisLabelTextStyle={styles.chartAxisText}
-                yAxisLabelSuffix="%"
-                maxValue={120}
-                stepValue={30}
-                noOfSections={4}
-                isAnimated={!reduceMotion}
-                animationDuration={860}
-                focusBarOnPress
-                disableScroll
-              />
-            </View>
-            <View style={styles.summaryList}>
-              {monthlyCategorySummary.map((item, index) => (
-                <Text key={item.budgetId} style={styles.summaryItem}>
-                  {index + 1}. {formatCurrency(item.spentCents)} / {formatCurrency(item.budgetCents)} (
-                  {Math.round(item.progressRatio * 100)}%) - {formatThresholdState(item.thresholdState)}
+        <View style={styles.card}>
+          <Text style={styles.label}>Category utilization (%)</Text>
+          {monthlyCategoryBars.length > 0 ? (
+            <Animated.View
+              style={[
+                styles.chartFrame,
+                {
+                  opacity: chartMotion,
+                  transform: [
+                    {
+                      translateY: chartMotion.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [18, 0],
+                      }),
+                    },
+                  ],
+                },
+              ]}>
+              <View style={styles.barChartCenter}>
+                <BarChart
+                  data={monthlyCategoryBars}
+                  barWidth={19}
+                  spacing={18}
+                  initialSpacing={12}
+                  barBorderRadius={9}
+                  roundedTop
+                  showGradient
+                  gradientColor={darkThemeTokens.surfaceAlt}
+                  hideRules={false}
+                  rulesColor={darkThemeTokens.surfaceAlt}
+                  rulesType="dashed"
+                  dashWidth={5}
+                  dashGap={4}
+                  xAxisColor={darkThemeTokens.surfaceAlt}
+                  yAxisColor={darkThemeTokens.surfaceAlt}
+                  yAxisTextStyle={styles.chartAxisText}
+                  xAxisLabelTextStyle={styles.chartAxisText}
+                  yAxisLabelSuffix="%"
+                  maxValue={120}
+                  stepValue={30}
+                  noOfSections={4}
+                  isAnimated={!reduceMotion}
+                  animationDuration={860}
+                  focusBarOnPress
+                  disableScroll
+                />
+              </View>
+              <View style={styles.summaryList}>
+                {monthlyCategorySummary.map((item, index) => (
+                  <Pressable
+                    key={item.budgetId}
+                    onPress={() => {
+                      setActiveBudgetId(item.budgetId);
+                      setSheetVisible(true);
+                    }}>
+                    <Text style={styles.summaryItem}>
+                      {index + 1}. {formatCurrency(item.spentCents)} / {formatCurrency(item.budgetCents)} (
+                      {Math.round(item.progressRatio * 100)}%) - {formatThresholdState(item.thresholdState)}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+            </Animated.View>
+          ) : (
+            <Text style={styles.muted}>No category budgets available.</Text>
+          )}
+        </View>
+
+        <View style={styles.card}>
+          <Text style={styles.label}>Manage budgets</Text>
+          {editableBudgets.length === 0 ? <Text style={styles.muted}>No budgets yet.</Text> : null}
+          {editableBudgets.map((budget) => (
+            <Pressable
+              key={budget.budgetId}
+              style={styles.row}
+              onPress={() => {
+                setActiveBudgetId(budget.budgetId);
+                setSheetVisible(true);
+              }}>
+              <View>
+                <Text style={styles.rowTitle}>
+                  {formatBudgetPeriodLabel(budget.period, budget.startDate)} - {budget.categoryName}
                 </Text>
-              ))}
-            </View>
-          </Animated.View>
-        ) : (
-          <Text style={styles.muted}>No category budgets available.</Text>
-        )}
-      </View>
+                <Text style={styles.rowMeta}>
+                  {budget.period} - {Math.round(budget.progressRatio * 100)}% used
+                </Text>
+              </View>
+              <Text style={styles.rowAmount}>{formatCurrency(budget.budgetCents)}</Text>
+            </Pressable>
+          ))}
+        </View>
 
         {loading ? <ActivityIndicator color={darkThemeTokens.accent} /> : null}
         {error ? <Text style={styles.errorText}>{error}</Text> : null}
       </ScrollView>
-      <AddExpenseFab onPress={() => setSheetVisible(true)} />
+
       {sheetVisible ? (
-        <TransactionSheet
+        <BudgetSheet
+          budgetId={activeBudgetId ?? undefined}
           presentation="modal"
-          onClose={() => setSheetVisible(false)}
+          onClose={() => {
+            setSheetVisible(false);
+            setActiveBudgetId(null);
+          }}
         />
       ) : null}
     </View>
@@ -201,6 +299,11 @@ const styles = StyleSheet.create({
     paddingBottom: 110,
     gap: 14,
   },
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
   title: {
     color: darkThemeTokens.textPrimary,
     fontSize: 32,
@@ -213,6 +316,9 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     padding: 16,
     gap: 8,
+  },
+  cardDisabled: {
+    opacity: 0.95,
   },
   label: {
     color: darkThemeTokens.textSecondary,
@@ -258,10 +364,35 @@ const styles = StyleSheet.create({
   },
   summaryItem: {
     color: darkThemeTokens.textSecondary,
-    fontSize: 13,
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 8,
+    borderBottomColor: darkThemeTokens.surfaceAlt,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  rowTitle: {
+    color: darkThemeTokens.textPrimary,
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  rowMeta: {
+    color: darkThemeTokens.textSecondary,
+    fontSize: 12,
+    marginTop: 2,
+  },
+  rowAmount: {
+    color: darkThemeTokens.textPrimary,
+    fontSize: 15,
+    fontWeight: '700',
   },
   errorText: {
     color: darkThemeTokens.danger,
     fontSize: 14,
+    fontWeight: '600',
   },
 });

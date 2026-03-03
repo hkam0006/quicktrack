@@ -1,50 +1,110 @@
-# Welcome to your Expo app 👋
+# Quick Track
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+Quick Track is an iOS-first personal expense tracker built with Expo + React Native.
 
-## Get started
+The app focuses on fast transaction capture, clear monthly budget visibility, and reliable offline-first behavior.
 
-1. Install dependencies
+## Preview
 
-   ```bash
-   npm install
-   ```
+<p align="center">
+  <img src="assets/images/home-screen.png" alt="Quick Track home screen" width="240" />
+  <img src="assets/images/transactions.png" alt="Quick Track transactions screen" width="240" />
+  <img src="assets/images/budgets.png" alt="Quick Track budgets screen" width="240" />
+</p>
 
-2. Start the app
+## Features (MVP)
 
-   ```bash
-   npx expo start
-   ```
+- Email/password authentication with Supabase Auth
+- Fast add/edit/delete/duplicate transactions
+- Category-based tracking and filtering
+- Monthly/yearly budgets with threshold warnings
+- Offline-first data entry with background sync
+- Dashboard metrics for month spend, income, net, and top categories
+- CSV export from local data
+- Siri Shortcut support for quick add (iOS dev build)
 
-In the output, you'll find options to open the app in a
+## Tech Stack
 
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
+- Expo (managed workflow) + React Native + TypeScript
+- Expo Router for navigation
+- Supabase (Postgres, Auth, RLS)
+- SQLite (`expo-sqlite`) for local persistence
+- React Hook Form + Zod for forms and validation
+- `react-native-gifted-charts` for charts
 
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
+## Quick Start
 
-## Get a fresh project
-
-When you're ready, run:
+### 1. Install dependencies
 
 ```bash
-npm run reset-project
+npm install
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+### 2. Configure environment
 
-## Learn more
+Create `.env` in project root:
 
-To learn more about developing your project with Expo, look at the following resources:
+```bash
+SUPABASE_URL=http://127.0.0.1:54321
+SUPABASE_ANON_KEY=your_anon_key
+```
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+### 3. Run the app
 
-## Join the community
+```bash
+npm run start
+```
 
-Join our community of developers creating universal apps.
+Use:
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+- `npm run ios` for iOS simulator/device
+- `npm run android` for Android
+- `npm run web` for web preview
+
+## Local Supabase (Optional)
+
+If you are running the backend locally:
+
+```bash
+supabase start
+supabase db reset
+```
+
+Then use the URL and anon key output by the Supabase CLI in `.env`.
+
+## Scripts
+
+- `npm run start` - start Expo dev server
+- `npm run ios` - run iOS build
+- `npm run android` - run Android build
+- `npm run web` - run web target
+- `npm run lint` - run lint checks
+
+## Project Structure
+
+```text
+app/                  Expo Router routes
+src/features/         Product features (home, transactions, budgets, settings, etc.)
+src/data/local/       SQLite schema, queries, migrations
+src/data/remote/      Supabase integration
+src/data/sync/        Offline outbox + sync engine
+src/shared/           Shared UI, theme, utilities, types
+supabase/migrations/  Database schema + RLS migrations
+```
+
+## Product Constraints (Current MVP)
+
+- Dark mode only
+- AUD currency only
+- iOS-first UX
+
+## Contributing
+
+1. Create a branch from `main`
+2. Make focused changes with clear commit messages
+3. Run `npm run lint`
+4. Open a pull request with a short test/verification summary
+
+## License
+
+No license has been added yet.

@@ -1,20 +1,20 @@
-import { useRouter } from 'expo-router';
 import React from 'react';
 import { Pressable, StyleSheet, Text } from 'react-native';
 import { useBottomTabBarHeight } from 'react-native-bottom-tabs';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { darkThemeTokens } from '@/src/shared/theme/tokens';
 
-export function AddExpenseFab() {
-  const router = useRouter();
+interface AddExpenseFabProps {
+  onPress?: () => void;
+}
+
+export function AddExpenseFab({ onPress }: AddExpenseFabProps) {
   const tabBarHeight = useBottomTabBarHeight();
-  const insets = useSafeAreaInsets();
 
   return (
     <Pressable
       style={[styles.fab, { bottom: tabBarHeight + 12 }]}
-      onPress={() => router.push('/add-transaction')}>
+      onPress={onPress}>
       <Text style={styles.plus}>+</Text>
       {/*<Text style={styles.label}>Add expense</Text>*/}
     </Pressable>

@@ -13,6 +13,7 @@ import {
 import { BarChart } from 'react-native-gifted-charts';
 
 import { useBudgetsData } from '@/src/features/budgets/use-budgets-data';
+import { TransactionSheet } from '@/src/features/transactions/transaction-sheet';
 import { darkThemeTokens } from '@/src/shared/theme/tokens';
 import { AddExpenseFab } from '@/src/shared/ui/add-expense-fab';
 
@@ -20,6 +21,7 @@ export default function BudgetsScreen() {
   const { data, monthlyOverall, loading, error, refresh, formatCurrency } = useBudgetsData();
   const [reduceMotion, setReduceMotion] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [sheetVisible, setSheetVisible] = useState(false);
   const chartMotion = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
@@ -180,7 +182,13 @@ export default function BudgetsScreen() {
         {loading ? <ActivityIndicator color={darkThemeTokens.accent} /> : null}
         {error ? <Text style={styles.errorText}>{error}</Text> : null}
       </ScrollView>
-      <AddExpenseFab />
+      <AddExpenseFab onPress={() => setSheetVisible(true)} />
+      {sheetVisible ? (
+        <TransactionSheet
+          presentation="modal"
+          onClose={() => setSheetVisible(false)}
+        />
+      ) : null}
     </View>
   );
 }

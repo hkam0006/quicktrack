@@ -1,5 +1,5 @@
 import { zodResolver } from '@hookform/resolvers/zod';
-import { Link, useRouter } from 'expo-router';
+import { Link } from 'expo-router';
 import React from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
@@ -9,7 +9,6 @@ import { useAuth } from '@/src/features/auth/auth.context';
 import { darkThemeTokens } from '@/src/shared/theme/tokens';
 
 export default function SignInScreen() {
-  const router = useRouter();
   const { signIn, isLoading, errorMessage, clearError } = useAuth();
   const {
     control,
@@ -25,14 +24,10 @@ export default function SignInScreen() {
 
   async function onSubmit(values: SignInFormValues) {
     clearError();
-    const ok = await signIn({
+    await signIn({
       email: values.email,
       password: values.password,
     });
-
-    if (ok) {
-      router.replace('/(tabs)');
-    }
   }
 
   return (

@@ -31,9 +31,15 @@ const initialState: AddTransactionFormState = {
   note: '',
 };
 
-export function useAddTransaction() {
+interface UseAddTransactionOptions {
+  transactionId?: string;
+}
+
+export function useAddTransaction(options: UseAddTransactionOptions = {}) {
+  const { transactionId } = options;
   const { user } = useAuth();
   const userId = user?.id ?? null;
+  const isEditing = Boolean(transactionId);
   const [form, setForm] = useState<AddTransactionFormState>(initialState);
   const [categories, setCategories] = useState<CategoryOption[]>([]);
   const [saving, setSaving] = useState(false);
@@ -53,13 +59,31 @@ export function useAddTransaction() {
       await repository.initLocalDatabase();
       const options = await repository.getCategoryOptions();
       setCategories(options);
-      if (!form.categoryId && options.length > 0) {
-        setForm((prev) => ({ ...prev, categoryId: options[0].id }));
+
+      if (transactionId) {
+        const existing = await repository.getTransactionById(transactionId);
+        if (!existing) {
+          setError('Transaction not found.');
+          return;
+        }
+
+        setForm({
+          type: existing.type,
+          amount: (existing.amount_cents / 100).toFixed(2),
+          categoryId: existing.category_id,
+          date: existing.occurred_at.slice(0, 10),
+          paymentMethod: existing.payment_method,
+          note: existing.note ?? '',
+        });
+        return;
       }
+
+      const firstCategoryId = options[0]?.id ?? null;
+      setForm((prev) => ({ ...prev, categoryId: prev.categoryId ?? firstCategoryId }));
     }
 
     void load();
-  }, [form.categoryId, repository]);
+  }, [repository, transactionId]);
 
   const update = useCallback((patch: Partial<AddTransactionFormState>) => {
     setForm((prev) => ({ ...prev, ...patch }));
@@ -93,10 +117,14 @@ export function useAddTransaction() {
     }
 
     try {
-      await repository.insertTransaction(payload);
+      if (transactionId) {
+        await repository.updateTransaction(transactionId, payload);
+      } else {
+        await repository.insertTransaction(payload);
+        setForm(initialState);
+      }
       notifyLocalDataChanged();
       void triggerSyncNow(userId);
-      setForm(initialState);
       return true;
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : 'Failed to save transaction');
@@ -104,13 +132,14 @@ export function useAddTransaction() {
     } finally {
       setSaving(false);
     }
-  }, [form, repository, userId]);
+  }, [form, repository, transactionId, userId]);
 
   return {
     form,
     categories,
     saving,
     error,
+    isEditing,
     update,
     save,
   };

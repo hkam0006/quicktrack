@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { createLocalDataRepository, formatCurrency } from '@/src/data/local/database';
-import { subscribeLocalDataChanges } from '@/src/data/local/events';
+import { notifyLocalDataChanged, subscribeLocalDataChanges } from '@/src/data/local/events';
 import { triggerSyncNow } from '@/src/data/sync/sync.service';
 import { useAuth } from '@/src/features/auth/auth.context';
 
@@ -58,6 +58,19 @@ export function useTransactionsData(query: string) {
     }
   }, [repository, userId]);
 
+  const deleteTransaction = useCallback(
+    async (transactionId: string) => {
+      if (!repository || !userId) {
+        throw new Error('You must be signed in to delete a transaction.');
+      }
+
+      await repository.softDeleteTransaction(transactionId);
+      notifyLocalDataChanged();
+      void triggerSyncNow(userId);
+    },
+    [repository, userId]
+  );
+
   useEffect(() => {
     void load();
 
@@ -85,6 +98,7 @@ export function useTransactionsData(query: string) {
     loading,
     error,
     refresh: load,
+    deleteTransaction,
     formatCurrency,
   };
 }

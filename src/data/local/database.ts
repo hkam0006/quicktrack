@@ -28,6 +28,27 @@ export interface TransactionInput {
   note: string | null;
 }
 
+interface TransactionEditRow {
+  id: string;
+  type: 'expense' | 'income';
+  amount_cents: number;
+  occurred_at: string;
+  category_id: string | null;
+  payment_method: 'cash' | 'card' | 'bank';
+  note: string | null;
+}
+
+interface TransactionSyncMetaRow {
+  type: 'expense' | 'income';
+  amount_cents: number;
+  occurred_at: string;
+  category_id: string | null;
+  payment_method: 'cash' | 'card' | 'bank';
+  note: string | null;
+  created_at: string;
+  recurrence_rule_id: string | null;
+}
+
 interface SumRow {
   spent_cents: number;
   income_cents: number;
@@ -60,6 +81,7 @@ interface TransactionRow {
   type: 'expense' | 'income';
   amount_cents: number;
   occurred_at: string;
+  category_id: string | null;
   category_name: string;
   payment_method: 'cash' | 'card' | 'bank';
   note: string | null;
@@ -202,8 +224,11 @@ export interface LocalDataRepository {
   getDailyTrendData: () => Promise<DailyTrendPoint[]>;
   getBudgetProgress: (period: 'monthly' | 'yearly') => Promise<BudgetProgress[]>;
   getTransactions: (limit?: number) => Promise<TransactionRow[]>;
+  getTransactionById: (transactionId: string) => Promise<TransactionEditRow | null>;
   getCategoryOptions: () => Promise<CategoryOptionRow[]>;
   insertTransaction: (input: TransactionInput) => Promise<void>;
+  updateTransaction: (transactionId: string, input: TransactionInput) => Promise<void>;
+  softDeleteTransaction: (transactionId: string) => Promise<void>;
   getPendingMutations: (limit?: number) => Promise<OutboxMutation[]>;
   markMutationComplete: (mutationId: string) => Promise<void>;
   markMutationFailed: (mutationId: string, reason: string) => Promise<void>;
@@ -540,6 +565,7 @@ async function getTransactionsForUser(userId: string, limit = 100): Promise<Tran
       t.type,
       t.amount_cents,
       t.occurred_at,
+      t.category_id,
       COALESCE(c.name, 'Uncategorized') as category_name,
       t.payment_method,
       t.note
@@ -552,6 +578,30 @@ async function getTransactionsForUser(userId: string, limit = 100): Promise<Tran
     userId,
     limit
   );
+}
+
+async function getTransactionByIdForUser(userId: string, transactionId: string): Promise<TransactionEditRow | null> {
+  const db = await getDbAsync();
+
+  const row = await db.getFirstAsync<TransactionEditRow>(
+    `SELECT
+      id,
+      type,
+      amount_cents,
+      occurred_at,
+      category_id,
+      payment_method,
+      note
+     FROM transactions
+     WHERE user_id = ?
+       AND id = ?
+       AND deleted_at IS NULL
+     LIMIT 1`,
+    userId,
+    transactionId
+  );
+
+  return row ?? null;
 }
 
 async function getCategoryOptionsForUser(userId: string): Promise<CategoryOptionRow[]> {
@@ -627,6 +677,120 @@ async function insertTransactionForUser(userId: string, input: TransactionInput)
     created_at: now,
     updated_at: now,
     deleted_at: null,
+  });
+}
+
+async function updateTransactionForUser(userId: string, transactionId: string, input: TransactionInput): Promise<void> {
+  const db = await getDbAsync();
+  const now = nowIso();
+
+  const existing = await db.getFirstAsync<TransactionSyncMetaRow>(
+    `SELECT created_at, recurrence_rule_id
+     FROM transactions
+     WHERE user_id = ?
+       AND id = ?
+       AND deleted_at IS NULL
+     LIMIT 1`,
+    userId,
+    transactionId
+  );
+
+  if (!existing) {
+    throw new Error('Transaction not found.');
+  }
+
+  await db.runAsync(
+    `UPDATE transactions
+     SET type = ?,
+         amount_cents = ?,
+         occurred_at = ?,
+         category_id = ?,
+         payment_method = ?,
+         note = ?,
+         updated_at = ?
+     WHERE user_id = ?
+       AND id = ?
+       AND deleted_at IS NULL`,
+    input.type,
+    input.amountCents,
+    input.occurredAt,
+    input.categoryId,
+    input.paymentMethod,
+    input.note,
+    now,
+    userId,
+    transactionId
+  );
+
+  await enqueueMutation(db, userId, 'transactions', 'update', transactionId, {
+    id: transactionId,
+    user_id: userId,
+    transaction_type: input.type,
+    amount_cents: input.amountCents,
+    occurred_at: input.occurredAt,
+    category_id: input.categoryId,
+    payment_method: input.paymentMethod,
+    note: input.note,
+    recurrence_rule_id: existing.recurrence_rule_id,
+    created_at: existing.created_at,
+    updated_at: now,
+    deleted_at: null,
+  });
+}
+
+async function softDeleteTransactionForUser(userId: string, transactionId: string): Promise<void> {
+  const db = await getDbAsync();
+  const now = nowIso();
+
+  const existing = await db.getFirstAsync<TransactionSyncMetaRow>(
+    `SELECT
+      type,
+      amount_cents,
+      occurred_at,
+      category_id,
+      payment_method,
+      note,
+      created_at,
+      recurrence_rule_id
+     FROM transactions
+     WHERE user_id = ?
+       AND id = ?
+       AND deleted_at IS NULL
+     LIMIT 1`,
+    userId,
+    transactionId
+  );
+
+  if (!existing) {
+    throw new Error('Transaction not found.');
+  }
+
+  await db.runAsync(
+    `UPDATE transactions
+     SET deleted_at = ?,
+         updated_at = ?
+     WHERE user_id = ?
+       AND id = ?
+       AND deleted_at IS NULL`,
+    now,
+    now,
+    userId,
+    transactionId
+  );
+
+  await enqueueMutation(db, userId, 'transactions', 'delete', transactionId, {
+    id: transactionId,
+    user_id: userId,
+    transaction_type: existing.type,
+    amount_cents: existing.amount_cents,
+    occurred_at: existing.occurred_at,
+    category_id: existing.category_id,
+    payment_method: existing.payment_method,
+    note: existing.note,
+    recurrence_rule_id: existing.recurrence_rule_id,
+    created_at: existing.created_at,
+    updated_at: now,
+    deleted_at: now,
   });
 }
 
@@ -991,8 +1155,11 @@ export function createLocalDataRepository(userId: string): LocalDataRepository {
     getDailyTrendData: () => getDailyTrendDataForUser(scopedUserId),
     getBudgetProgress: (period) => getBudgetProgressForUser(scopedUserId, period),
     getTransactions: (limit) => getTransactionsForUser(scopedUserId, limit),
+    getTransactionById: (transactionId) => getTransactionByIdForUser(scopedUserId, transactionId),
     getCategoryOptions: () => getCategoryOptionsForUser(scopedUserId),
     insertTransaction: (input) => insertTransactionForUser(scopedUserId, input),
+    updateTransaction: (transactionId, input) => updateTransactionForUser(scopedUserId, transactionId, input),
+    softDeleteTransaction: (transactionId) => softDeleteTransactionForUser(scopedUserId, transactionId),
     getPendingMutations: (limit) => getPendingMutationsForUser(scopedUserId, limit),
     markMutationComplete: (mutationId) => markMutationCompleteForUser(scopedUserId, mutationId),
     markMutationFailed: (mutationId, reason) => markMutationFailedForUser(scopedUserId, mutationId, reason),

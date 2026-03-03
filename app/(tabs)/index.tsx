@@ -15,6 +15,7 @@ import { LineChart, PieChart } from "react-native-gifted-charts";
 
 import { formatCurrency, formatShortDay } from "@/src/data/local/database";
 import { useHomeData } from "@/src/features/home/use-home-data";
+import { TransactionSheet } from "@/src/features/transactions/transaction-sheet";
 import { darkThemeTokens } from "@/src/shared/theme/tokens";
 import { AddExpenseFab } from "@/src/shared/ui/add-expense-fab";
 
@@ -23,6 +24,7 @@ export default function HomeScreen() {
   const [reduceMotion, setReduceMotion] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [selectedCategoryIndex, setSelectedCategoryIndex] = useState(-1);
+  const [sheetVisible, setSheetVisible] = useState(false);
   const pieMotion = useRef(new Animated.Value(0)).current;
   const trendMotion = useRef(new Animated.Value(0)).current;
   const pieSelectMotion = useRef(new Animated.Value(1)).current;
@@ -258,8 +260,15 @@ export default function HomeScreen() {
                           },
                         ]}
                       >
-                        <Text style={styles.centerLabelTitle}>${(data.summary.spentCents / 100).toFixed(2)}</Text>
-                        <Text style={styles.centerLabelSubtitle}>
+                        <Text
+                          style={styles.centerLabelTitle}
+                          numberOfLines={1}
+                          adjustsFontSizeToFit
+                          minimumFontScale={0.75}
+                        >
+                          {formatCurrency((data.summary.spentCents))}
+                        </Text>
+                        <Text style={styles.centerLabelSubtitle} numberOfLines={1}>
                           {new Date(data.summary.monthStart).toLocaleDateString('en-AU', {
                             month: 'long',
                             year: 'numeric',
@@ -380,7 +389,13 @@ export default function HomeScreen() {
         {loading ? <ActivityIndicator color={darkThemeTokens.accent} /> : null}
         {error ? <Text style={styles.errorText}>{error}</Text> : null}
       </ScrollView>
-      <AddExpenseFab />
+      <AddExpenseFab onPress={() => setSheetVisible(true)} />
+      {sheetVisible ? (
+        <TransactionSheet
+          presentation="modal"
+          onClose={() => setSheetVisible(false)}
+        />
+      ) : null}
     </View>
   );
 }
@@ -487,17 +502,19 @@ const styles = StyleSheet.create({
   centerLabelWrap: {
     alignItems: "center",
     justifyContent: "center",
-    maxWidth: 92,
+    width: 120,
   },
   centerLabelTitle: {
     color: darkThemeTokens.textPrimary,
     fontSize: 22,
     fontWeight: "700",
+    textAlign: "center",
   },
   centerLabelSubtitle: {
     color: darkThemeTokens.textSecondary,
     fontSize: 12,
     fontWeight: "600",
+    textAlign: "center",
   },
   centerLabelEmptyTitle: {
     color: darkThemeTokens.textSecondary,

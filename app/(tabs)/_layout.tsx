@@ -7,6 +7,8 @@ import type { ParamListBase, TabNavigationState } from '@react-navigation/native
 import { withLayoutContext } from 'expo-router';
 import React from 'react';
 
+import { useAuth } from '@/src/features/auth/auth.context';
+import { AuthLoadingView } from '@/src/features/auth/auth-loading-view';
 import { darkThemeTokens } from '@/src/shared/theme/tokens';
 
 const BottomTabs = createNativeBottomTabNavigator();
@@ -19,6 +21,12 @@ const Tabs = withLayoutContext<
 >(BottomTabs.Navigator);
 
 export default function TabLayout() {
+  const { isLoading } = useAuth();
+
+  if (isLoading) {
+    return <AuthLoadingView />;
+  }
+
   return (
     <Tabs
       hapticFeedbackEnabled
